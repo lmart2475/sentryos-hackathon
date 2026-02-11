@@ -2,6 +2,7 @@
 
 import { Folder, FileText, MessageCircle } from 'lucide-react'
 import { useState, useRef } from 'react'
+import * as Sentry from '@sentry/nextjs'
 
 export interface FolderItem {
   id: string
@@ -49,6 +50,21 @@ export function FolderView({ items, folderName }: FolderViewProps) {
         // Single click - just select
         if (clickCountRef.current === 1) {
           setSelectedId(item.id)
+
+          // Log item selection
+          Sentry.logger.info("File manager item selected", {
+            component: "FolderView",
+            action: "select",
+            itemId: item.id,
+            itemName: item.name,
+            itemType: item.type,
+            folderName
+          })
+
+          // Track selection metric
+          Sentry.metrics.count("sentryos.folder.item.selected", 1, {
+            tags: { itemType: item.type }
+          })
         }
         clickCountRef.current = 0
       }, 250)
@@ -59,6 +75,22 @@ export function FolderView({ items, folderName }: FolderViewProps) {
       }
       clickCountRef.current = 0
       setSelectedId(item.id)
+
+      // Log item open
+      Sentry.logger.info("File manager item opened", {
+        component: "FolderView",
+        action: "open",
+        itemId: item.id,
+        itemName: item.name,
+        itemType: item.type,
+        folderName
+      })
+
+      // Track open metric
+      Sentry.metrics.count("sentryos.folder.item.opened", 1, {
+        tags: { itemType: item.type }
+      })
+
       item.onOpen?.()
     }
   }

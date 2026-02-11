@@ -3,10 +3,37 @@
 import { Clock } from 'lucide-react'
 import { useWindowManager } from './WindowManager'
 import { useEffect, useState } from 'react'
+import * as Sentry from '@sentry/nextjs'
 
 export function Taskbar() {
   const { windows, restoreWindow, focusWindow } = useWindowManager()
   const [time, setTime] = useState('')
+
+  // Track session duration
+  useEffect(() => {
+    const sessionStartTime = Date.now()
+
+    // Log session start
+    Sentry.logger.info("Desktop session started", {
+      component: "Taskbar",
+      timestamp: new Date().toISOString()
+    })
+
+    return () => {
+      // Log session end with duration
+      const sessionDuration = Date.now() - sessionStartTime
+      Sentry.logger.info("Desktop session ended", {
+        component: "Taskbar",
+        sessionDuration,
+        timestamp: new Date().toISOString()
+      })
+
+      // Track session duration metric
+      Sentry.metrics.distribution("sentryos.session.duration", sessionDuration, {
+        unit: "millisecond"
+      })
+    }
+  }, [])
 
   useEffect(() => {
     const updateTime = () => {
@@ -24,6 +51,17 @@ export function Taskbar() {
 
   const handleWindowClick = (id: string, isMinimized: boolean) => {
     if (isMinimized) {
+      // Log window restoration from taskbar
+      const window = windows.find(w => w.id === id)
+      if (window) {
+        Sentry.logger.info("Window restored from taskbar click", {
+          component: "Taskbar",
+          action: "taskbar_restore",
+          windowId: id,
+          windowType: window.type,
+          windowTitle: window.title
+        })
+      }
       restoreWindow(id)
     } else {
       focusWindow(id)

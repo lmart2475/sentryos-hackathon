@@ -2,6 +2,7 @@
 
 import { useState, useCallback, createContext, useContext, ReactNode } from 'react'
 import { WindowState } from './types'
+import * as Sentry from '@sentry/nextjs'
 
 interface WindowManagerContextType {
   windows: WindowState[]
@@ -35,6 +36,28 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
       const newZ = currentZ + 1
       setWindows(prev => {
         const existing = prev.find(w => w.id === window.id)
+        const isNewWindow = !existing
+        const action = existing?.isMinimized ? 'restore' : (existing ? 'focus' : 'open')
+
+        if (isNewWindow) {
+          // Log window open
+          Sentry.logger.info("Window opened", {
+            component: "WindowManager",
+            action: "open",
+            windowId: window.id,
+            windowType: window.type
+          })
+
+          // Track window action metric
+          Sentry.metrics.count("sentryos.window.action", 1, {
+            tags: { action: "open", windowType: window.type }
+          })
+
+          // Update window count gauge (will be incremented)
+          const newCount = prev.length + 1
+          Sentry.metrics.gauge("sentryos.window.open_count", newCount)
+        }
+
         if (existing) {
           if (existing.isMinimized) {
             return prev.map(w =>
@@ -59,29 +82,107 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const closeWindow = useCallback((id: string) => {
-    setWindows(prev => prev.filter(w => w.id !== id))
+    setWindows(prev => {
+      const window = prev.find(w => w.id === id)
+      if (window) {
+        // Log window close
+        Sentry.logger.info("Window closed", {
+          component: "WindowManager",
+          action: "close",
+          windowId: id,
+          windowType: window.type
+        })
+
+        // Track window action metric
+        Sentry.metrics.count("sentryos.window.action", 1, {
+          tags: { action: "close", windowType: window.type }
+        })
+
+        // Update window count gauge (will be decremented)
+        const newCount = prev.length - 1
+        Sentry.metrics.gauge("sentryos.window.open_count", newCount)
+      }
+
+      return prev.filter(w => w.id !== id)
+    })
   }, [])
 
   const minimizeWindow = useCallback((id: string) => {
-    setWindows(prev => prev.map(w =>
-      w.id === id ? { ...w, isMinimized: true, isFocused: false } : w
-    ))
+    setWindows(prev => {
+      const window = prev.find(w => w.id === id)
+      if (window) {
+        // Log window minimize
+        Sentry.logger.info("Window minimized", {
+          component: "WindowManager",
+          action: "minimize",
+          windowId: id,
+          windowType: window.type
+        })
+
+        // Track window action metric
+        Sentry.metrics.count("sentryos.window.action", 1, {
+          tags: { action: "minimize", windowType: window.type }
+        })
+      }
+
+      return prev.map(w =>
+        w.id === id ? { ...w, isMinimized: true, isFocused: false } : w
+      )
+    })
   }, [])
 
   const maximizeWindow = useCallback((id: string) => {
-    setWindows(prev => prev.map(w =>
-      w.id === id ? { ...w, isMaximized: !w.isMaximized } : w
-    ))
+    setWindows(prev => {
+      const window = prev.find(w => w.id === id)
+      if (window) {
+        const newMaximizedState = !window.isMaximized
+
+        // Log window maximize/restore
+        Sentry.logger.info(newMaximizedState ? "Window maximized" : "Window restored from maximize", {
+          component: "WindowManager",
+          action: newMaximizedState ? "maximize" : "restore",
+          windowId: id,
+          windowType: window.type
+        })
+
+        // Track window action metric
+        Sentry.metrics.count("sentryos.window.action", 1, {
+          tags: { action: newMaximizedState ? "maximize" : "restore", windowType: window.type }
+        })
+      }
+
+      return prev.map(w =>
+        w.id === id ? { ...w, isMaximized: !w.isMaximized } : w
+      )
+    })
   }, [])
 
   const restoreWindow = useCallback((id: string) => {
     setTopZIndex(currentZ => {
       const newZ = currentZ + 1
-      setWindows(prev => prev.map(w =>
-        w.id === id
-          ? { ...w, isMinimized: false, isFocused: true, zIndex: newZ }
-          : { ...w, isFocused: false }
-      ))
+      setWindows(prev => {
+        const window = prev.find(w => w.id === id)
+        if (window) {
+          // Log window restore
+          Sentry.logger.info("Window restored from taskbar", {
+            component: "WindowManager",
+            action: "restore",
+            windowId: id,
+            windowType: window.type
+          })
+
+          // Track window action metric
+          Sentry.metrics.count("sentryos.window.action", 1, {
+            tags: { action: "restore", windowType: window.type }
+          })
+        }
+
+        return prev.map(w =>
+          w.id === id
+            ? { ...w, isMinimized: false, isFocused: true, zIndex: newZ }
+            : { ...w, isFocused: false }
+        )
+      })
       return newZ
     })
   }, [])
@@ -89,11 +190,29 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
   const focusWindow = useCallback((id: string) => {
     setTopZIndex(currentZ => {
       const newZ = currentZ + 1
-      setWindows(prev => prev.map(w =>
-        w.id === id
-          ? { ...w, isFocused: true, zIndex: newZ }
-          : { ...w, isFocused: false }
-      ))
+      setWindows(prev => {
+        const window = prev.find(w => w.id === id)
+        if (window && !window.isFocused) {
+          // Log window focus (only if not already focused)
+          Sentry.logger.info("Window focused", {
+            component: "WindowManager",
+            action: "focus",
+            windowId: id,
+            windowType: window.type
+          })
+
+          // Track window action metric
+          Sentry.metrics.count("sentryos.window.action", 1, {
+            tags: { action: "focus", windowType: window.type }
+          })
+        }
+
+        return prev.map(w =>
+          w.id === id
+            ? { ...w, isFocused: true, zIndex: newZ }
+            : { ...w, isFocused: false }
+        )
+      })
       return newZ
     })
   }, [])
